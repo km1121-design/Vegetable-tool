@@ -217,6 +217,17 @@ test('PDF を読み込んで保存 → 完了 → 追加 → 読み込み直し�
   assert.equal(undo.data.stops[1].doneAt, '');
 });
 
+test('配送タブの行数が足りなくなっても、行を足して書き込める', async () => {
+  const { tab } = loadAppsScript(USERS);
+  const yamada = await signIn('1111');
+  await call(day, { token: yamada, body: { action: 'save', date: '2026-11-24', items: LIST_A } });
+  tab('配送').setMaxRows(3);
+  const res = await call(day, { token: yamada, body: { action: 'save', date: '2026-11-25', items: LIST_B } });
+  assert.equal(res.status, 200);
+  assert.ok(tab('配送').getMaxRows() >= 9);
+  assert.equal((await call(day, { token: yamada, method: 'GET', url: '/api/day?date=2026-11-24' })).data.stops.length, 4);
+});
+
 test('配送の API は入力を確かめる', async () => {
   loadAppsScript(USERS);
   const yamada = await signIn('1111');

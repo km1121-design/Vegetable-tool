@@ -8,10 +8,12 @@ import vm from 'node:vm';
 
 export const TOKEN = 'test-shared-secret-123';
 
-export function makeSheet(name, initial = []) {
+export function makeSheet(name, initial = [], { maxRows = 1000 } = {}) {
   const rows = initial.map((row) => [...row]);
+  let max = maxRows;
   const cellAt = (r, c) => rows[r - 1]?.[c - 1] ?? '';
   const put = (r, c, value) => {
+    if (r > max) throw new Error(`範囲外の行 ${r}（最大 ${max}）`);
     while (rows.length < r) rows.push([]);
     rows[r - 1][c - 1] = value;
   };
@@ -19,10 +21,14 @@ export function makeSheet(name, initial = []) {
     rows,
     getName: () => name,
     getLastRow: () => rows.length,
-    appendRow: (row) => rows.push([...row]),
+    getMaxRows: () => max,
+    insertRowsAfter: (after, count) => { max += count; },
+    setMaxRows: (n) => { max = n; },
+    appendRow: (row) => { if (rows.length >= max) max += 1; rows.push([...row]); },
     setFrozenRows() {},
     getRange: (r, c = 1, numRows = 1, numCols = 1) => ({
       getValues: () => Array.from({ length: numRows }, (u, i) => Array.from({ length: numCols }, (v, j) => cellAt(r + i, c + j))),
+      setNumberFormat() {},
       setValues: (values) => values.forEach((row, i) => row.forEach((value, j) => put(r + i, c + j, value))),
       clearContent: () => {
         for (let i = 0; i < numRows; i += 1) for (let j = 0; j < numCols; j += 1) if (rows[r - 1 + i]) rows[r - 1 + i][c - 1 + j] = '';

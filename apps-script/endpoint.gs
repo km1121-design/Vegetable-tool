@@ -119,6 +119,7 @@ function dayGet_(date) {
 function writeDay_(sheet, rows, date, dayRows) {
   const others = rows.filter(function (r) { return r[0] && dateText_(r[1]) !== date; });
   const all = others.concat(dayRows);
+  ensureRows_(sheet, all.length + 1);
   if (all.length) sheet.getRange(2, 1, all.length, STOP_HEADER.length).setValues(all);
   if (rows.length > all.length) sheet.getRange(2 + all.length, 1, rows.length - all.length, STOP_HEADER.length).clearContent();
 }
@@ -228,16 +229,23 @@ function payList_(user, all, month) {
 
 /* ---------- 共通 ---------- */
 
-/** タブを開く。無ければ見出しつきで作る。 */
+/** タブを開く。無ければ見出しつきで作る（日付・時刻・コードが勝手に変換されないよう、書式なしテキストにする）。 */
 function tab_(name, header) {
   const book = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = book.getSheetByName(name);
   if (!sheet) {
     sheet = book.insertSheet(name);
+    sheet.getRange(1, 1, sheet.getMaxRows(), header.length).setNumberFormat('@');
     sheet.appendRow(header);
     sheet.setFrozenRows(1);
   }
   return sheet;
+}
+
+/** シートの行数が足りなければ足す（足した行は上の行の書式を引き継ぐ）。 */
+function ensureRows_(sheet, rows) {
+  const max = sheet.getMaxRows();
+  if (max < rows) sheet.insertRowsAfter(max, rows - max + 200);
 }
 
 /** シートが日付に変えてしまった値も YYYY-MM-DD に戻す。 */

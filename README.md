@@ -31,6 +31,21 @@
 配送タブにはキーボックスの番号なども入ります。シートの共有は必要な人だけにしてください。
 本物の配送リスト（PDF）はリポジトリに入れません（試験は作りものの見本で行います）。
 
+## 設置（はじめの1回）
+
+保存先のスプレッドシート「縁 野菜配送（データ）」は作成済み（タブ・見出し・日本時間・書式なしテキストの設定まで）。
+
+1. そのスプレッドシートで「拡張機能 → Apps Script」を開き、`apps-script/endpoint.gs` の全文を貼る
+2. `TOKEN` を長い合言葉に書き換えて保存 →「デプロイ → 新しいデプロイ → ウェブアプリ」（実行: 自分 / アクセス: 全員）
+3. Cloudflare Pages →「Workers & Pages → 作成 → Pages → Git に接続」でこのリポジトリを選ぶ
+   - プロジェクト名 `enishi-haisou`（URL が https://enishi-haisou.pages.dev になる）
+   - フレームワーク: なし／ビルドコマンド: 空欄／出力ディレクトリ: `public`
+4. 「設定 → 環境変数」に `APPS_SCRIPT_URL`（デプロイの URL）と `APPS_SCRIPT_TOKEN`（合言葉）を入れて出し直す
+5. 「利用者」タブに 名前 / 利用コード / 有効（空欄で有効）/ 区分（事務は「管理者」）を書く
+6. https://enishi-haisou.pages.dev/api/health で `"scriptVersion":1` と `"scriptReady":true` が出れば完了
+
+合言葉・利用コードは GitHub やチャットに書かず、Apps Script と Cloudflare の入力欄にだけ入れてください。
+
 ## PDF の読み取りについて
 
 ブラウザで pdf.js（jsdelivr から読み込み）を使って文字と位置を取り出し、サーバーの決まった計算
