@@ -1,0 +1,12 @@
+{
+  "name": "enishi-yasai-haisou",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "縁（野菜配送）のルート配送アプリ",
+  "scripts": {
+    "dev": "node dev-server.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": { "node": ">=20" }
+}

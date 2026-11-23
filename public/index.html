@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>縁 野菜配送</title>
+<style>
+  :root { --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #5d6676; --line: #dde1e7; --accent: #1f6feb; --bad: #c62828; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #14171c; --card: #1d2128; --text: #e7eaf0; --muted: #9aa3b2; --line: #313844; --accent: #5b9dff; --bad: #ff6b6b; } }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 system-ui, -apple-system, "Hiragino Sans", sans-serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 16px; }
+  section { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 8px 0 16px; }
+  h2 { font-size: 17px; margin: 0 0 12px; }
+  label { display: block; font-size: 14px; color: var(--muted); margin: 10px 0 4px; }
+  input, textarea { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+  button { font: inherit; padding: 10px 16px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; margin-top: 12px; cursor: pointer; }
+  button.plain { background: transparent; color: var(--accent); padding: 4px 0; }
+  .msg { min-height: 1.6em; color: var(--muted); }
+  .msg.bad { color: var(--bad); }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li { border-top: 1px solid var(--line); padding: 8px 0; display: flex; justify-content: space-between; gap: 8px; }
+  .total { font-weight: 700; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>縁 野菜配送</h1>
+
+  <section id="login">
+    <h2>利用コードを入れてください</h2>
+    <input id="code" inputmode="numeric" autocomplete="off">
+    <button id="loginBtn">はじめる</button>
+    <p class="msg" id="loginMsg"></p>
+  </section>
+
+  <div id="app" hidden>
+    <p><span id="who"></span> <button class="plain" id="logout">ログアウト</button></p>
+
+    <section>
+      <h2>記録する</h2>
+      <label for="date">日付</label><input id="date" type="date">
+      <label for="title">件名</label><input id="title">
+      <label for="amount">金額</label><input id="amount" inputmode="numeric">
+      <label for="note">メモ</label><textarea id="note" rows="2"></textarea>
+      <button id="save">保存</button>
+      <p class="msg" id="saveMsg"></p>
+    </section>
+
+    <section>
+      <h2>記録 <button class="plain" id="allBtn" hidden>全員分を見る</button></h2>
+      <p class="total" id="total"></p>
+      <ul id="list"></ul>
+    </section>
+  </div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const TOKEN_KEY = 'field-app-token';
+  const storage = {
+    get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+    set(key, value) { try { value == null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch {} },
+  };
+  let showAll = false;
+
+  async function api(path, { method = 'GET', body } = {}) {
+    const token = storage.get(TOKEN_KEY);
+    const res = await fetch(`/api/${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.status === 401 && path !== 'login') { logout(); throw new Error(data.error || 'もう一度ログインしてください。'); }
+    if (!res.ok) throw new Error(data.error || '通信に失敗しました。');
+    return data;
+  }
+
+  function showApp(name, admin) {
+    $('login').hidden = true;
+    $('app').hidden = false;
+    $('who').textContent = `${name} さん`;
+    $('allBtn').hidden = !admin;
+    $('date').value = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+    load();
+  }
+
+  function logout() {
+    storage.set(TOKEN_KEY, null);
+    storage.set('field-app-user', null);
+    $('app').hidden = true;
+    $('login').hidden = false;
+  }
+
+  async function load() {
+    try {
+      const data = await api(`records${showAll ? '?all=1' : ''}`);
+      $('total').textContent = `${data.summary.count} 件・合計 ${data.summary.total.toLocaleString()} 円`;
+      $('list').replaceChildren(...data.records.slice().reverse().map((r) => {
+        const li = document.createElement('li');
+        const left = document.createElement('span');
+        left.textContent = `${r.date} ${r.title}${showAll ? `（${r.name}）` : ''}`;
+        const right = document.createElement('span');
+        right.textContent = `${r.amount.toLocaleString()} 円`;
+        li.append(left, right);
+        return li;
+      }));
+    } catch (error) {
+      $('total').textContent = error.message;
+    }
+  }
+
+  $('loginBtn').onclick = async () => {
+    $('loginMsg').className = 'msg';
+    $('loginMsg').textContent = '確かめています…';
+    try {
+      const data = await api('login', { method: 'POST', body: { code: $('code').value } });
+      storage.set(TOKEN_KEY, data.token);
+      storage.set('field-app-user', JSON.stringify({ name: data.user, admin: data.admin }));
+      $('code').value = '';
+      $('loginMsg').textContent = '';
+      showApp(data.user, data.admin);
+    } catch (error) {
+      $('loginMsg').className = 'msg bad';
+      $('loginMsg').textContent = error.message;
+    }
+  };
+
+  $('save').onclick = async () => {
+    $('saveMsg').className = 'msg';
+    $('saveMsg').textContent = '保存しています…';
+    try {
+      await api('records', { method: 'POST', body: { record: { date: $('date').value, title: $('title').value, amount: $('amount').value, note: $('note').value } } });
+      $('saveMsg').textContent = '保存しました。';
+      $('title').value = $('amount').value = $('note').value = '';
+      load();
+    } catch (error) {
+      $('saveMsg').className = 'msg bad';
+      $('saveMsg').textContent = error.message;
+    }
+  };
+
+  $('allBtn').onclick = () => {
+    showAll = !showAll;
+    $('allBtn').textContent = showAll ? '自分の分に戻す' : '全員分を見る';
+    load();
+  };
+  $('logout').onclick = logout;
+
+  try {
+    const saved = JSON.parse(storage.get('field-app-user') || 'null');
+    if (saved && storage.get(TOKEN_KEY)) showApp(saved.name, saved.admin);
+  } catch {}
+</script>
+</body>
+</html>
