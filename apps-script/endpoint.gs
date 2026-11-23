@@ -10,7 +10,10 @@
  *
  * タブ（無ければ自動で作る）
  *   利用者 … 名前 / 利用コード / 有効 / 区分（「管理者」なら管理者）/ メモ
- *   記録   … 記録ID / 日付 / 名前 / 件名 / 金額 / メモ / 登録日時
+ *   配送   … 配送ID / 日付 / コース / 順番 / 便 / 会社名 / 住所 / 備考 / 追加 / 完了時刻 / 完了者
+ *   日当   … 日当ID / 日付 / 名前 / コース / 予定件数 / 完了件数 / 出発 / 終了 / 更新日時
+ *
+ * 配送タブにはキーボックスの番号なども入る。シートの共有先は必要な人だけにする。
  *
  * 合言葉はこのスクリプトとホスティングの環境変数にだけ置く。GitHub やチャットには書かない。
  */
@@ -20,8 +23,10 @@ const SCRIPT_VERSION = 1;
 
 const USER_TAB = '利用者';
 const USER_HEADER = ['名前', '利用コード', '有効', '区分', 'メモ'];
-const RECORD_TAB = '記録';
-const RECORD_HEADER = ['記録ID', '日付', '名前', '件名', '金額', 'メモ', '登録日時'];
+const STOP_TAB = '配送';
+const STOP_HEADER = ['配送ID', '日付', 'コース', '順番', '便', '会社名', '住所', '備考', '追加', '完了時刻', '完了者'];
+const PAY_TAB = '日当';
+const PAY_HEADER = ['日当ID', '日付', '名前', 'コース', '予定件数', '完了件数', '出発', '終了', '更新日時'];
 
 /** 「有効」列で停止を意味する値。空欄は有効。 */
 const DISABLED_VALUES = ['false', '×', '✕', 'x', '停止', '無効', '0', 'いいえ', 'no', 'off'];
@@ -44,10 +49,15 @@ function doPost(e) {
   try {
     const user = userOf_(body.code);
     if (!user) return json_({ ok: false, error: 'user' });
+    if (/^(day|payPress)/.test(String(body.action)) && !/^\d{4}-\d{2}-\d{2}$/.test(String(body.date || ''))) return json_({ ok: false, error: 'date' });
     switch (body.action) {
       case 'login': return json_({ ok: true, user: user.name, admin: user.admin });
-      case 'recordSave': return json_(recordSave_(user, body.record || {}));
-      case 'recordList': return json_(recordList_(user, body.all === true));
+      case 'dayGet': return json_(dayGet_(String(body.date || '')));
+      case 'daySave': return json_(daySave_(String(body.date || ''), String(body.course || ''), Array.isArray(body.stops) ? body.stops : []));
+      case 'dayAdd': return json_(dayAdd_(String(body.date || ''), String(body.course || ''), body.stop || {}, body.after));
+      case 'dayDone': return json_(dayDone_(user, String(body.date || ''), String(body.id || ''), String(body.time || '')));
+      case 'payPress': return json_(payPress_(user, String(body.date || ''), String(body.kind || ''), String(body.time || ''), String(body.course || '')));
+      case 'payList': return json_(payList_(user, body.all === true, String(body.month || '')));
       default: return json_({ ok: false, error: 'action' });
     }
   } catch (err) {
@@ -82,41 +92,138 @@ function userOf_(code) {
   return null;
 }
 
-/* ---------- 記録 ---------- */
+/* ---------- 配送（その日の配送先） ---------- */
 
-function recordSave_(user, record) {
-  const sheet = tab_(RECORD_TAB, RECORD_HEADER);
-  const id = /^[A-Za-z0-9_-]{6,40}$/.test(String(record.id || '')) ? String(record.id) : newId_();
-  const row = [id, String(record.date || ''), user.name, String(record.title || ''), Number(record.amount) || 0, String(record.note || ''), new Date()];
+function dayRows_() {
+  const sheet = tab_(STOP_TAB, STOP_HEADER);
   const last = sheet.getLastRow();
-  if (last >= 2) {
-    const ids = sheet.getRange(2, 1, last - 1, 3).getValues();
-    for (let i = 0; i < ids.length; i += 1) {
-      if (String(ids[i][0]) !== id) continue;
-      // 他人の記録は上書きさせない（管理者は可）
-      if (String(ids[i][2]) !== user.name && !user.admin) return { ok: false, error: 'admin' };
-      row[2] = String(ids[i][2]);
-      sheet.getRange(i + 2, 1, 1, row.length).setValues([row]);
-      return { ok: true, id: id };
-    }
-  }
-  sheet.appendRow(row);
-  return { ok: true, id: id };
+  const rows = last < 2 ? [] : sheet.getRange(2, 1, last - 1, STOP_HEADER.length).getValues();
+  return { sheet: sheet, rows: rows };
 }
 
-function recordList_(user, all) {
-  if (all && !user.admin) return { ok: false, error: 'admin' };
-  const sheet = tab_(RECORD_TAB, RECORD_HEADER);
-  const last = sheet.getLastRow();
-  if (last < 2) return { ok: true, records: [] };
-  const rows = sheet.getRange(2, 1, last - 1, RECORD_HEADER.length).getValues();
-  const records = [];
-  for (let i = 0; i < rows.length; i += 1) {
-    const r = rows[i];
-    if (!r[0] || (!all && String(r[2]) !== user.name)) continue;
-    records.push({ id: String(r[0]), date: dateText_(r[1]), name: String(r[2]), title: String(r[3]), amount: Number(r[4]) || 0, note: String(r[5] || '') });
+function stopOf_(r) {
+  return {
+    id: String(r[0]), date: dateText_(r[1]), course: String(r[2] || ''), order: Number(r[3]) || 0, run: String(r[4] || ''),
+    name: String(r[5] || ''), address: String(r[6] || ''), note: String(r[7] || ''), added: String(r[8] || '') === '追加',
+    doneAt: timeText_(r[9]), doneBy: String(r[10] || ''),
+  };
+}
+
+function dayGet_(date) {
+  const rows = dayRows_().rows.filter(function (r) { return r[0] && dateText_(r[1]) === date; });
+  const stops = rows.map(stopOf_).sort(function (a, b) { return a.order - b.order; });
+  return { ok: true, stops: stops };
+}
+
+/** その日の行だけを書き換える（ほかの日の行はそのまま）。 */
+function writeDay_(sheet, rows, date, dayRows) {
+  const others = rows.filter(function (r) { return r[0] && dateText_(r[1]) !== date; });
+  const all = others.concat(dayRows);
+  if (all.length) sheet.getRange(2, 1, all.length, STOP_HEADER.length).setValues(all);
+  if (rows.length > all.length) sheet.getRange(2 + all.length, 1, rows.length - all.length, STOP_HEADER.length).clearContent();
+}
+
+/**
+ * 読み込んだ配送リストでその日を置き換える。
+ * すでに「完了」にした配送先は（会社名と住所が同じなら）完了のまま残し、手で足した配送先は最後に残す。
+ */
+function daySave_(date, course, stops) {
+  const data = dayRows_();
+  const old = data.rows.filter(function (r) { return r[0] && dateText_(r[1]) === date; }).map(stopOf_);
+  const done = {};
+  old.forEach(function (s) { if (s.doneAt) done[s.name + '|' + s.address] = s; });
+  const keys = {};
+  const next = stops.map(function (s) {
+    const key = s.name + '|' + s.address;
+    keys[key] = true;
+    const d = done[key];
+    return [newId_(), date, course, 0, s.run || '', s.name, s.address, s.note || '', '', d ? d.doneAt : '', d ? d.doneBy : ''];
+  });
+  old.forEach(function (s) {
+    if (s.added && !keys[s.name + '|' + s.address]) next.push([s.id, date, course, 0, s.run, s.name, s.address, s.note, '追加', s.doneAt, s.doneBy]);
+  });
+  next.forEach(function (r, i) { r[3] = i + 1; });
+  writeDay_(data.sheet, data.rows, date, next);
+  return dayGet_(date);
+}
+
+/** その日に1件足す。after 番目の次に入れる（0 なら先頭、無ければ最後）。 */
+function dayAdd_(date, course, stop, after) {
+  const data = dayRows_();
+  const day = data.rows.filter(function (r) { return r[0] && dateText_(r[1]) === date; })
+    .sort(function (a, b) { return (Number(a[3]) || 0) - (Number(b[3]) || 0); });
+  const pos = after === null || after === undefined || after === '' || isNaN(Number(after)) ? day.length : Math.max(0, Math.min(day.length, Number(after)));
+  const useCourse = day.length ? String(day[0][2] || course) : course;
+  // 同じ ID がもうあれば足さない（送り直しで2件にならないように）
+  const id = /^[A-Za-z0-9_-]{6,40}$/.test(String(stop.id || '')) ? String(stop.id) : newId_();
+  if (day.some(function (r) { return String(r[0]) === id; })) return dayGet_(date);
+  day.splice(pos, 0, [id, date, useCourse, 0, stop.run || '', stop.name, stop.address, stop.note || '', '追加', '', '']);
+  day.forEach(function (r, i) { r[1] = date; r[3] = i + 1; });
+  writeDay_(data.sheet, data.rows, date, day);
+  return dayGet_(date);
+}
+
+/** 完了にする・戻す。 */
+function dayDone_(user, date, id, time) {
+  const data = dayRows_();
+  for (let i = 0; i < data.rows.length; i += 1) {
+    const r = data.rows[i];
+    if (String(r[0]) !== id || dateText_(r[1]) !== date) continue;
+    data.sheet.getRange(i + 2, 10, 1, 2).setValues([time ? [time, user.name] : ['', '']]);
+    return dayGet_(date);
   }
-  return { ok: true, records: records };
+  return { ok: false, error: 'notfound' };
+}
+
+/* ---------- 日当 ---------- */
+
+function payRows_() {
+  const sheet = tab_(PAY_TAB, PAY_HEADER);
+  const last = sheet.getLastRow();
+  const rows = last < 2 ? [] : sheet.getRange(2, 1, last - 1, PAY_HEADER.length).getValues();
+  return { sheet: sheet, rows: rows };
+}
+
+function payOf_(r) {
+  return {
+    date: dateText_(r[1]), name: String(r[2] || ''), course: String(r[3] || ''),
+    planned: Number(r[4]) || 0, done: Number(r[5]) || 0, start: timeText_(r[6]), end: timeText_(r[7]),
+  };
+}
+
+/** 出発・終了を押したとき。件数はその日の配送タブから数える（自分が完了にした数）。 */
+function payPress_(user, date, kind, time, course) {
+  const stops = dayGet_(date).stops;
+  const planned = stops.length;
+  const done = stops.filter(function (s) { return s.doneAt && s.doneBy === user.name; }).length;
+  const useCourse = stops.length ? stops[0].course : course;
+  const data = payRows_();
+  const id = date + '|' + user.name;
+  for (let i = 0; i < data.rows.length; i += 1) {
+    const r = data.rows[i];
+    if (String(r[0]) !== id) continue;
+    const row = r.slice();
+    row[3] = useCourse; row[4] = planned; row[5] = done; row[8] = new Date();
+    if (kind === 'start') row[6] = time;
+    if (kind === 'end') row[7] = time;
+    if (kind === 'cancelEnd') row[7] = '';
+    row[6] = row[6] instanceof Date ? timeText_(row[6]) : row[6];
+    row[7] = row[7] instanceof Date ? timeText_(row[7]) : row[7];
+    data.sheet.getRange(i + 2, 1, 1, PAY_HEADER.length).setValues([row]);
+    return { ok: true, pay: payOf_(row) };
+  }
+  if (kind !== 'start') return { ok: false, error: 'nostart' };
+  const row = [id, date, user.name, useCourse, planned, done, time, '', new Date()];
+  data.sheet.appendRow(row);
+  return { ok: true, pay: payOf_(row) };
+}
+
+function payList_(user, all, month) {
+  if (all && !user.admin) return { ok: false, error: 'admin' };
+  const list = payRows_().rows.filter(function (r) { return r[0]; }).map(payOf_).filter(function (p) {
+    return (all || p.name === user.name) && (!month || p.date.slice(0, 7) === month);
+  });
+  return { ok: true, pays: list };
 }
 
 /* ---------- 共通 ---------- */
@@ -136,6 +243,12 @@ function tab_(name, header) {
 /** シートが日付に変えてしまった値も YYYY-MM-DD に戻す。 */
 function dateText_(value) {
   if (value instanceof Date) return Utilities.formatDate(value, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  return String(value || '');
+}
+
+/** シートが時刻に変えてしまった値も HH:mm に戻す。 */
+function timeText_(value) {
+  if (value instanceof Date) return Utilities.formatDate(value, Session.getScriptTimeZone(), 'HH:mm');
   return String(value || '');
 }
 

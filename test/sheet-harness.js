@@ -24,6 +24,11 @@ export function makeSheet(name, initial = []) {
     getRange: (r, c = 1, numRows = 1, numCols = 1) => ({
       getValues: () => Array.from({ length: numRows }, (u, i) => Array.from({ length: numCols }, (v, j) => cellAt(r + i, c + j))),
       setValues: (values) => values.forEach((row, i) => row.forEach((value, j) => put(r + i, c + j, value))),
+      clearContent: () => {
+        for (let i = 0; i < numRows; i += 1) for (let j = 0; j < numCols; j += 1) if (rows[r - 1 + i]) rows[r - 1 + i][c - 1 + j] = '';
+        // 本物のシートと同じく、末尾の空行は getLastRow に数えない
+        while (rows.length && rows.at(-1).every((v) => v === '' || v === undefined)) rows.pop();
+      },
     }),
   };
 }
@@ -40,7 +45,12 @@ export function loadAppsScript(users, { url = process.env.APPS_SCRIPT_URL } = {}
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) },
     Session: { getScriptTimeZone: () => 'Asia/Tokyo' },
     SpreadsheetApp: { getActiveSpreadsheet: () => book },
-    Utilities: { formatDate: (date) => new Date(date.getTime() + 9 * 3600e3).toISOString().slice(0, 10) },
+    Utilities: {
+      formatDate: (date, tz, format) => {
+        const iso = new Date(date.getTime() + 9 * 3600e3).toISOString();
+        return format === 'HH:mm' ? iso.slice(11, 16) : iso.slice(0, 10);
+      },
+    },
     ContentService: { MimeType: { JSON: 'json' }, createTextOutput: (text) => ({ setMimeType: () => text }) },
   };
   const source = fs.readFileSync(new URL('../apps-script/endpoint.gs', import.meta.url), 'utf8')

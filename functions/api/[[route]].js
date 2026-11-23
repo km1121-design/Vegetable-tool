@@ -8,9 +8,10 @@
 
 import health from '../../api/health.js';
 import login from '../../api/login.js';
-import records from '../../api/records.js';
+import day from '../../api/day.js';
+import nittou from '../../api/nittou.js';
 
-const ROUTES = { health, login, records };
+const ROUTES = { health, login, day, nittou };
 
 const json = (status, data, headers = {}) => new Response(JSON.stringify(data), {
   status,

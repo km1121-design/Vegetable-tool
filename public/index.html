@@ -23,6 +23,29 @@
   li { border-top: 1px solid var(--line); padding: 8px 0; display: flex; justify-content: space-between; gap: 8px; }
   .total { font-weight: 700; }
   [hidden] { display: none !important; }
+  select { width: 100%; font: inherit; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.sub { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  button.good { background: #2e7d32; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .row > * { flex: 1 1 0; min-width: 0; }
+  .muted { color: var(--muted); font-size: 14px; }
+  .big { font-size: 18px; font-weight: 700; }
+  .stop { display: block; border-top: 1px solid var(--line); padding: 12px 0; }
+  .stop.done { opacity: .55; }
+  .stop .head { display: flex; gap: 8px; align-items: baseline; }
+  .stop .no { min-width: 2em; font-weight: 700; color: var(--accent); }
+  .stop .name { font-weight: 700; flex: 1; overflow-wrap: anywhere; }
+  .tag { font-size: 12px; border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; color: var(--muted); white-space: nowrap; }
+  .stop .addr { font-size: 14px; color: var(--muted); margin: 2px 0 0 2.5em; overflow-wrap: anywhere; }
+  .stop .note { font-size: 14px; white-space: pre-wrap; margin: 4px 0 0 2.5em; padding: 6px 8px; background: var(--bg); border-radius: 6px; overflow-wrap: anywhere; }
+  .stop .acts { display: flex; gap: 8px; margin: 6px 0 0 2.5em; }
+  .stop .acts > * { flex: 1; margin-top: 0; text-align: center; }
+  a.btn { display: inline-block; font: inherit; padding: 10px 16px; border-radius: 8px; border: 1px solid var(--accent); color: var(--accent); text-decoration: none; }
+  .links { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 4px; border-top: 1px solid var(--line); }
+  .preview li { font-size: 14px; }
 </style>
 </head>
 <body>
@@ -40,30 +63,70 @@
     <p><span id="who"></span> <button class="plain" id="logout">ログアウト</button></p>
 
     <section>
-      <h2>記録する</h2>
-      <label for="date">日付</label><input id="date" type="date">
-      <label for="title">件名</label><input id="title">
-      <label for="amount">金額</label><input id="amount" inputmode="numeric">
-      <label for="note">メモ</label><textarea id="note" rows="2"></textarea>
-      <button id="save">保存</button>
-      <p class="msg" id="saveMsg"></p>
+      <div class="row">
+        <div><label for="date">配送日</label><input id="date" type="date"></div>
+        <div><label for="course">コース</label><select id="course"></select></div>
+      </div>
+      <p class="muted" id="departure"></p>
+      <div class="row">
+        <button id="startBtn" class="good">出発</button>
+        <button id="endBtn">終了</button>
+      </div>
+      <p class="msg" id="payMsg"></p>
     </section>
 
     <section>
-      <h2>記録 <button class="plain" id="allBtn" hidden>全員分を見る</button></h2>
-      <p class="total" id="total"></p>
-      <ul id="list"></ul>
+      <h2>配送先 <span class="muted" id="progress"></span></h2>
+      <p class="msg" id="dayMsg"></p>
+      <div class="links" id="routes"></div>
+      <div id="stops"></div>
+    </section>
+
+    <section>
+      <h2>配送リストを読み込む</h2>
+      <p class="muted">その日の配送リスト（PDF）を選んでください。✔ がある行だけを配ります。✔ が無ければ全部を配ります。</p>
+      <input id="pdf" type="file" accept="application/pdf,.pdf">
+      <p class="msg" id="pdfMsg"></p>
+      <div id="preview" hidden>
+        <ul class="preview" id="previewList"></ul>
+        <button id="saveList">この内容でこの日の配送先にする</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>急な追加</h2>
+      <label for="addName">会社名</label><input id="addName">
+      <label for="addAddress">住所</label><input id="addAddress">
+      <label for="addNote">備考</label><textarea id="addNote" rows="2"></textarea>
+      <label for="addAfter">何番の次に入れるか（空なら最後）</label><input id="addAfter" inputmode="numeric">
+      <button id="addBtn">追加する</button>
+      <p class="msg" id="addMsg"></p>
+    </section>
+
+    <section>
+      <h2>日当 <button class="plain" id="allBtn" hidden>全員分を見る</button></h2>
+      <input id="month" type="month">
+      <p class="total" id="payTotal"></p>
+      <table><thead><tr><th>日付</th><th id="nameHead" hidden>名前</th><th>コース</th><th>件数</th><th>出発</th><th>終了</th></tr></thead><tbody id="payList"></tbody></table>
     </section>
   </div>
 </main>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <script>
   const $ = (id) => document.getElementById(id);
-  const TOKEN_KEY = 'field-app-token';
+  const TOKEN_KEY = 'enishi-token';
+  const USER_KEY = 'enishi-user';
+  const PDFJS = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/';
   const storage = {
     get(key) { try { return localStorage.getItem(key); } catch { return null; } },
     set(key, value) { try { value == null ? localStorage.removeItem(key) : localStorage.setItem(key, value); } catch {} },
   };
   let showAll = false;
+  let day = null;
+  let pdfItems = null;
+  const today = () => new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
+  const el = (tag, props = {}, ...children) => { const node = Object.assign(document.createElement(tag), props); node.append(...children); return node; };
+  const say = (id, text, bad = false) => { $(id).className = bad ? 'msg bad' : 'msg'; $(id).textContent = text; };
 
   async function api(path, { method = 'GET', body } = {}) {
     const token = storage.get(TOKEN_KEY);
@@ -83,74 +146,209 @@
     $('app').hidden = false;
     $('who').textContent = `${name} さん`;
     $('allBtn').hidden = !admin;
-    $('date').value = new Date(Date.now() + 9 * 3600e3).toISOString().slice(0, 10);
-    load();
+    if (!$('date').value) $('date').value = today();
+    if (!$('month').value) $('month').value = today().slice(0, 7);
+    loadDay();
+    loadPay();
   }
 
   function logout() {
     storage.set(TOKEN_KEY, null);
-    storage.set('field-app-user', null);
+    storage.set(USER_KEY, null);
     $('app').hidden = true;
     $('login').hidden = false;
   }
 
-  async function load() {
+  /* ---------- その日の配送先 ---------- */
+
+  async function loadDay() {
+    say('dayMsg', '読み込んでいます…');
     try {
-      const data = await api(`records${showAll ? '?all=1' : ''}`);
-      $('total').textContent = `${data.summary.count} 件・合計 ${data.summary.total.toLocaleString()} 円`;
-      $('list').replaceChildren(...data.records.slice().reverse().map((r) => {
-        const li = document.createElement('li');
-        const left = document.createElement('span');
-        left.textContent = `${r.date} ${r.title}${showAll ? `（${r.name}）` : ''}`;
-        const right = document.createElement('span');
-        right.textContent = `${r.amount.toLocaleString()} 円`;
-        li.append(left, right);
-        return li;
-      }));
+      showDay(await api(`day?date=${encodeURIComponent($('date').value)}`));
+      say('dayMsg', '');
     } catch (error) {
-      $('total').textContent = error.message;
+      say('dayMsg', error.message, true);
     }
   }
 
-  $('loginBtn').onclick = async () => {
-    $('loginMsg').className = 'msg';
-    $('loginMsg').textContent = '確かめています…';
+  function showDay(data) {
+    day = data;
+    const course = $('course');
+    if (!course.options.length) course.append(...data.courses.map((c) => el('option', { value: c, textContent: c })));
+    course.value = data.course;
+    $('departure').textContent = `出発地点：${data.departure}`;
+    const done = data.stops.filter((s) => s.doneAt).length;
+    $('progress').textContent = data.stops.length ? `完了 ${done} / ${data.stops.length} 件` : '';
+    if (!data.stops.length) say('dayMsg', 'この日の配送先はまだありません。下の「配送リストを読み込む」から PDF を選んでください。');
+
+    const links = [];
+    if (data.restRoutes.length) {
+      links.push(...data.restRoutes.map((r, i) => el('a', { className: 'btn', href: r.url, target: '_blank', rel: 'noopener', textContent: `今いる場所から残りを道案内（${i + 1}）` })));
+    }
+    links.push(...data.routes.map((r) => el('a', { className: 'btn', href: r.url, target: '_blank', rel: 'noopener', textContent: `出発地点からまとめて道案内（${r.from}〜${r.to} 件目）` })));
+    $('routes').replaceChildren(...links);
+
+    $('stops').replaceChildren(...data.stops.map((s) => {
+      const head = el('div', { className: 'head' }, el('span', { className: 'no', textContent: s.no }), el('span', { className: 'name', textContent: s.name }));
+      if (s.run) head.append(el('span', { className: 'tag', textContent: s.run }));
+      if (s.added) head.append(el('span', { className: 'tag', textContent: '追加' }));
+      const box = el('div', { className: `stop${s.doneAt ? ' done' : ''}` }, head, el('div', { className: 'addr', textContent: s.address }));
+      if (s.note) box.append(el('div', { className: 'note', textContent: s.note }));
+      const doneBtn = el('button', { className: s.doneAt ? 'sub' : 'good', textContent: s.doneAt ? `完了 ${s.doneAt}（戻す）` : '完了' });
+      doneBtn.onclick = () => markDone(s, doneBtn);
+      box.append(el('div', { className: 'acts' }, el('a', { className: 'btn', href: s.mapUrl, target: '_blank', rel: 'noopener', textContent: '道案内' }), doneBtn));
+      return box;
+    }));
+  }
+
+  async function markDone(stop, button) {
+    if (stop.doneAt && !confirm(`「${stop.name}」の完了を取り消しますか？`)) return;
+    button.disabled = true;
     try {
-      const data = await api('login', { method: 'POST', body: { code: $('code').value } });
-      storage.set(TOKEN_KEY, data.token);
-      storage.set('field-app-user', JSON.stringify({ name: data.user, admin: data.admin }));
-      $('code').value = '';
-      $('loginMsg').textContent = '';
-      showApp(data.user, data.admin);
+      showDay(await api('day', { method: 'POST', body: { action: 'done', date: day.date, id: stop.id, done: !stop.doneAt } }));
     } catch (error) {
-      $('loginMsg').className = 'msg bad';
-      $('loginMsg').textContent = error.message;
+      button.disabled = false;
+      say('dayMsg', error.message, true);
+    }
+  }
+
+  /* ---------- 配送リスト（PDF）の読み込み ---------- */
+
+  async function readPdf(file) {
+    if (!window.pdfjsLib) throw new Error('PDF を読む部品を読み込めませんでした。電波の良いところでもう一度開いてください。');
+    pdfjsLib.GlobalWorkerOptions.workerSrc = `${PDFJS}build/pdf.worker.min.js`;
+    const doc = await pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), cMapUrl: `${PDFJS}cmaps/`, cMapPacked: true }).promise;
+    const items = [];
+    const r = (n) => Math.round(n * 10) / 10;
+    for (let p = 1; p <= doc.numPages; p += 1) {
+      const page = await doc.getPage(p);
+      const height = page.getViewport({ scale: 1 }).height;
+      const text = await page.getTextContent();
+      for (const it of text.items) {
+        if (!it.str || !it.str.trim()) continue;
+        items.push({ p, x: r(it.transform[4]), y: r(height - it.transform[5]), w: r(it.width), s: it.str });
+      }
+    }
+    return items;
+  }
+
+  $('pdf').onchange = async () => {
+    const file = $('pdf').files[0];
+    $('preview').hidden = true;
+    pdfItems = null;
+    if (!file) return;
+    say('pdfMsg', '読み取っています…');
+    try {
+      const items = await readPdf(file);
+      const data = await api('day', { method: 'POST', body: { action: 'preview', items } });
+      pdfItems = items;
+      const how = data.checked ? `✔ がある ${data.checked} 件を配ります` : '✔ が無いので全部を配ります';
+      say('pdfMsg', `${data.total} 件を読み取りました。${how}。内容を確かめて、下のボタンを押してください。`);
+      $('previewList').replaceChildren(...data.stops.map((s) => el('li', {}, el('span', { textContent: `${s.order}. ${s.run ? `[${s.run}] ` : ''}${s.name}` }), el('span', { className: 'muted', textContent: s.address }))));
+      $('saveList').textContent = `この内容で ${$('date').value}（${$('course').value}）の配送先にする`;
+      $('preview').hidden = false;
+    } catch (error) {
+      say('pdfMsg', error.message, true);
     }
   };
 
-  $('save').onclick = async () => {
-    $('saveMsg').className = 'msg';
-    $('saveMsg').textContent = '保存しています…';
+  $('saveList').onclick = async () => {
+    if (!pdfItems) return;
+    if (day && day.stops.length && !confirm('この日の配送先を、読み込んだ内容に置き換えます。完了にした分はそのまま残ります。よろしいですか？')) return;
+    $('saveList').disabled = true;
+    say('pdfMsg', '保存しています…');
     try {
-      await api('records', { method: 'POST', body: { record: { date: $('date').value, title: $('title').value, amount: $('amount').value, note: $('note').value } } });
-      $('saveMsg').textContent = '保存しました。';
-      $('title').value = $('amount').value = $('note').value = '';
-      load();
+      showDay(await api('day', { method: 'POST', body: { action: 'save', date: $('date').value, course: $('course').value, items: pdfItems } }));
+      say('pdfMsg', '保存しました。');
+      $('preview').hidden = true;
+      $('pdf').value = '';
+      pdfItems = null;
+      say('dayMsg', '');
     } catch (error) {
-      $('saveMsg').className = 'msg bad';
-      $('saveMsg').textContent = error.message;
+      say('pdfMsg', error.message, true);
+    } finally {
+      $('saveList').disabled = false;
     }
   };
+
+  /* ---------- 急な追加 ---------- */
+
+  $('addBtn').onclick = async () => {
+    say('addMsg', '追加しています…');
+    $('addBtn').disabled = true;
+    try {
+      const id = `s${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      showDay(await api('day', { method: 'POST', body: { action: 'add', date: $('date').value, course: $('course').value, after: $('addAfter').value.trim(), stop: { id, name: $('addName').value, address: $('addAddress').value, note: $('addNote').value } } }));
+      say('addMsg', '追加しました。');
+      $('addName').value = $('addAddress').value = $('addNote').value = $('addAfter').value = '';
+      say('dayMsg', '');
+    } catch (error) {
+      say('addMsg', error.message, true);
+    } finally {
+      $('addBtn').disabled = false;
+    }
+  };
+
+  /* ---------- 日当 ---------- */
+
+  async function press(kind) {
+    if (kind === 'end') {
+      const left = day ? day.stops.filter((s) => !s.doneAt).length : 0;
+      if (left && !confirm(`まだ完了にしていない配送先が ${left} 件あります。終了にしますか？`)) return;
+    }
+    say('payMsg', '記録しています…');
+    try {
+      const { pay } = await api('nittou', { method: 'POST', body: { kind, date: $('date').value, course: $('course').value } });
+      say('payMsg', `${pay.date} 出発 ${pay.start || '—'} ／ 終了 ${pay.end || '—'} ／ 完了 ${pay.done} / ${pay.planned} 件`);
+      loadPay();
+    } catch (error) {
+      say('payMsg', error.message, true);
+    }
+  }
+  $('startBtn').onclick = () => press('start');
+  $('endBtn').onclick = () => press('end');
+
+  async function loadPay() {
+    try {
+      const data = await api(`nittou?month=${encodeURIComponent($('month').value)}${showAll ? '&all=1' : ''}`);
+      $('nameHead').hidden = !showAll;
+      $('payTotal').textContent = `${data.days} 日・完了 ${data.done} 件`;
+      $('payList').replaceChildren(...data.pays.map((p) => {
+        const cells = [p.date.slice(5), ...(showAll ? [p.name] : []), p.course, `${p.done}/${p.planned}`, p.start || '—', p.end || '—'];
+        return el('tr', {}, ...cells.map((c) => el('td', { textContent: c })));
+      }));
+      const mine = data.pays.find((p) => p.date === $('date').value && (!showAll || p.name === (JSON.parse(storage.get(USER_KEY) || '{}').name)));
+      if (mine && !$('payMsg').textContent) say('payMsg', `出発 ${mine.start || '—'} ／ 終了 ${mine.end || '—'}`);
+    } catch (error) {
+      $('payTotal').textContent = error.message;
+    }
+  }
 
   $('allBtn').onclick = () => {
     showAll = !showAll;
     $('allBtn').textContent = showAll ? '自分の分に戻す' : '全員分を見る';
-    load();
+    loadPay();
   };
+  $('month').onchange = loadPay;
+  $('date').onchange = () => { $('course').replaceChildren(); say('payMsg', ''); loadDay(); };
   $('logout').onclick = logout;
 
+  $('loginBtn').onclick = async () => {
+    say('loginMsg', '確かめています…');
+    try {
+      const data = await api('login', { method: 'POST', body: { code: $('code').value } });
+      storage.set(TOKEN_KEY, data.token);
+      storage.set(USER_KEY, JSON.stringify({ name: data.user, admin: data.admin }));
+      $('code').value = '';
+      say('loginMsg', '');
+      showApp(data.user, data.admin);
+    } catch (error) {
+      say('loginMsg', error.message, true);
+    }
+  };
+
   try {
-    const saved = JSON.parse(storage.get('field-app-user') || 'null');
+    const saved = JSON.parse(storage.get(USER_KEY) || 'null');
     if (saved && storage.get(TOKEN_KEY)) showApp(saved.name, saved.admin);
   } catch {}
 </script>

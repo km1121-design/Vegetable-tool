@@ -70,6 +70,9 @@ async function callOnce(body) {
   if (!data?.ok) {
     if (data?.error === 'token') throw { status: 500, code: 'not_configured', message: '合言葉が一致しません。APPS_SCRIPT_TOKEN を確認してください。' };
     if (data?.error === 'user') throw { status: 401, code: 'unauthorized', message: 'このコードは使えません。' };
+    if (data?.error === 'notfound') throw { status: 404, code: 'not_found', message: 'その配送先が見つかりません。画面を読み込み直してください。' };
+    if (data?.error === 'nostart') throw { status: 409, code: 'no_start', message: '先に「出発」を押してください。' };
+    if (data?.error === 'date') throw { status: 400, code: 'invalid', message: '日付が正しくありません。' };
     if (data?.error === 'admin') throw { status: 403, code: 'forbidden', message: '管理者だけが使えます。' };
     // シート側で起きたエラーの文（長い英数字は伏せる）
     const detail = String(data?.error ?? '').replace(/[A-Za-z0-9_-]{24,}/g, '***').slice(0, 200);
